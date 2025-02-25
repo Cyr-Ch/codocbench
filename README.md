@@ -142,7 +142,7 @@ To extract your own dataset, follow these steps:
 
 The `parse.py` script also records solitary docstring changes and solitary code changes in the `differ_files/` folder. The file name will be in the format `combined_diff_mapping_docstring_.jsonl` and `combined_diff_mapping_code_.jsonl`, respectively. However, these are not post-processed and may contain false positives.
 
-5. To extract your own dataset from the main branch only without any commit history, you can use the `parse_main.py` script. The script has a few variants that you can use to customize the extraction process.
+6. To extract your own dataset from the main branch only without any commit history, you can use the `parse_main.py` script. The script has a few variants that you can use to customize the extraction process.
 
     1. *Variant : Extracting from a single project*
 
@@ -162,7 +162,7 @@ The `parse.py` script also records solitary docstring changes and solitary code 
 
     
 
-5. The extracted code-documentation pairs will be saved in the `differ_files/` folder in JSONL format. The file name will be in the format `codocbench.jsonl`.
+7. The extracted code-documentation pairs will be saved in the `differ_files/` folder in JSONL format. The file name will be in the format `codocbench.jsonl`.
 
 The `parse.py` script also records solitary docstring changes and solitary code changes in the `differ_files/` folder. The file name will be in the format `combined_diff_mapping_docstring_.jsonl` and `combined_diff_mapping_code_.jsonl`, respectively. However, these are not post-processed and may contain false positives.
 
