@@ -1,0 +1,190 @@
+import os
+import sys
+import json
+from git import Repo
+import re
+
+def clone_repository(username, repository):
+    """
+    Clone the repository if it does not exist
+
+    :param username: Username of the repository owner
+    :param repository: Name of the repository
+    """
+    repo_url = f'https://github.com/{username}/{repository}.git'
+    repo_path = f'{username}_{repository}'
+
+    if not os.path.exists(repo_path):
+        os.system(f'git clone {repo_url} {repo_path}')
+
+    return repo_path
+
+def process_file(repo_path, file_path):
+    """
+    Process a single file to extract docstrings, code, and other metadata
+    
+    :param repo_path: Path to the repository
+    :param file_path: Path to the file relative to the repo
+    :return: List of dictionaries containing function info
+    """
+    full_path = os.path.join(repo_path, file_path)
+    functions_info = []
+    
+    try:
+        with open(full_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+            functions = extract_functions_and_docstrings(content, file_path)
+            
+            for func_name, func_data in functions.items():
+                # Only include functions with non-empty docstrings
+                if func_data['docstring'].strip():
+                    functions_info.append({
+                        'file_path': file_path,
+                        'function': func_name,
+                        'code': func_data['code'],
+                        'code_lines': func_data['code_lines'],
+                        'docstring': func_data['docstring'],
+                        'docstring_lines': func_data['docstring_lines']
+                    })
+    except Exception as e:
+        print(f"Error processing file {file_path}: {e}")
+    
+    return functions_info
+
+def extract_functions_and_docstrings(content, filepath):
+    """
+    Extract functions and their docstrings from the content
+    
+    :param content: Content of the file
+    :param filepath: Path to the file
+    :return: Dictionary of functions and their data
+    """
+    functions = {}
+    lines = content.split('\n')
+    current_line_number = 1
+
+    in_docstring = False
+    docstring_lines = []
+    current_function = None
+    start_line = 0
+    start_code_line = 0
+    code = []
+
+    for line in lines:
+        if in_docstring:
+            if '"""' in line:
+                docstring_lines.append(line.strip())
+                in_docstring = False
+                start_code_line = current_line_number + 1
+                
+                if current_function:
+                    functions[current_function] = {
+                        'docstring_lines': {'start_line': start_line, 'end_line': current_line_number},
+                        'docstring': '\n'.join(docstring_lines),
+                        'code': '',  # Will be populated when the function ends
+                        'code_lines': {'start_line': start_code_line, 'end_line': 0}  # End line will be set later
+                    }
+            else:
+                docstring_lines.append(line.strip())
+        elif line.count('"""') == 2:  # Single line docstring
+            if current_function:
+                functions[current_function] = {
+                    'docstring_lines': {'start_line': current_line_number, 'end_line': current_line_number},
+                    'docstring': line.strip(),
+                    'code': '',
+                    'code_lines': {'start_line': current_line_number + 1, 'end_line': 0}
+                }
+                start_code_line = current_line_number + 1
+        elif '"""' in line:
+            in_docstring = True
+            start_line = current_line_number
+            docstring_lines = [line.strip()]
+        else:
+            # Check if the line contains a function or class definition
+            func_match = re.match(r'\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\)\s*(?:->\s*([a-zA-Z_][a-zA-Z0-9_.\[\]]*)\s*)?:', line)
+            class_match = re.match(r'\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\(.*\))?\s*:', line)
+            
+            if func_match or class_match:
+                # Save the previous function's code if there was one
+                if current_function and current_function in functions:
+                    functions[current_function]['code'] = '\n'.join(code)
+                    functions[current_function]['code_lines']['end_line'] = current_line_number - 1
+                
+                # Start a new function
+                current_function = func_match.group(1) if func_match else class_match.group(1)
+                code = [line]
+                start_line = current_line_number
+            elif current_function and current_function in functions:
+                # Add line to the current function's code
+                code.append(line)
+        
+        current_line_number += 1
+    
+    # Save the last function's code if there was one
+    if current_function and current_function in functions:
+        functions[current_function]['code'] = '\n'.join(code)
+        functions[current_function]['code_lines']['end_line'] = current_line_number - 1
+    
+    return functions
+
+def get_python_files(repo_path):
+    """
+    Get all Python files in the repository
+    
+    :param repo_path: Path to the repository
+    :return: List of Python file paths
+    """
+    python_files = []
+    for root, _, files in os.walk(repo_path):
+        for file in files:
+            if file.endswith('.py'):
+                rel_path = os.path.relpath(os.path.join(root, file), repo_path)
+                python_files.append(rel_path)
+    return python_files
+
+def process_repository(username, repository, output_file='docstrings.jsonl'):
+    """
+    Process a repository to extract docstrings from all Python files
+    
+    :param username: GitHub username
+    :param repository: Repository name
+    :param output_file: Output file to save the results
+    """
+    repo_path = clone_repository(username, repository)
+    
+    # Checkout the main branch
+    repo = Repo(repo_path)
+    default_branch = repo.active_branch.name
+    print(f"Using default branch: {default_branch}")
+    
+    # Get all Python files
+    python_files = get_python_files(repo_path)
+    print(f"Found {len(python_files)} Python files")
+    
+    # Process each file
+    all_functions = []
+    for i, file_path in enumerate(python_files):
+        print(f"Processing file {i+1}/{len(python_files)}: {file_path}")
+        functions_info = process_file(repo_path, file_path)
+        all_functions.extend(functions_info)
+    
+    # Write results to JSONL file
+    with open(output_file, 'w') as f:
+        for func_info in all_functions:
+            f.write(json.dumps(func_info) + '\n')
+    
+    print(f"Extracted {len(all_functions)} functions with non-empty docstrings to {output_file}")
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: python parse_main.py <username> <repository> [output_file]")
+        sys.exit(1)
+    
+    username = sys.argv[1]
+    repository = sys.argv[2]
+    output_file = sys.argv[3] if len(sys.argv) > 3 else 'docstrings.jsonl'
+    
+    process_repository(username, repository, output_file)
+
+if __name__ == "__main__":
+    main() 
